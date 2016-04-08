@@ -1,0 +1,215 @@
+
+using Newtonsoft.Json;
+
+using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading.Tasks;
+using System.Web;
+
+namespace cf.Services.Base {
+    public class BaseService : IBaseService {
+        private WebApiResponseError _error;
+
+        public string BaseUrl { get { return ConfigurationManager.AppSettings["webapiurl"]; } }
+
+        protected T Deserialize<T>(string jsonString) {
+            return JsonConvert.DeserializeObject<T>(jsonString);
+        }
+
+        protected string Serialize(object obj) {
+            return JsonConvert.SerializeObject(obj);
+        }
+
+        protected readonly ILogger Logger;
+        public string AccountNumber { get; set; }
+ 
+        public WebApiResponseError Error {
+            get { return _error; }
+            set { _error = value; }
+        }
+
+        public BaseService(Type type) {
+            Logger = new ILogger(type);
+        }
+
+        protected bool SendRequest<T>(string webMethod, T dataObject, out string jsonResponse) {
+            Logger.Debug("SendRequest begin");
+            jsonResponse = "";
+            try {
+                HttpResponseMessage response;
+                //Console.WriteLine("REQUEST: " + webMethod + " " + Environment.NewLine + (JsonConvert.SerializeObject(dataObject)));
+                Logger.Debug("HttpClient initializing");
+                using (var client = GetClient()) {
+                    Logger.Debug("Request {0} Sent at {1}", webMethod, DateTime.Now.ToString("dd-MMM-yyyy HH:mm:ss"));
+                    response = AsyncHelpers.RunSync(() => client.PostAsJsonAsync(webMethod, dataObject));
+                    jsonResponse = AsyncHelpers.RunSync(() => response.Content.ReadAsStringAsync());
+                    Logger.Debug("Response {0} Returned at {1}", webMethod, DateTime.Now.ToString("dd-MMM-yyyy HH:mm:ss"));
+                    Console.WriteLine("RESPONSE: " + webMethod + " " + Environment.NewLine + jsonResponse);
+                    return response.IsSuccessStatusCode;
+                }
+            }
+            catch (Exception ex) {
+                Logger.Error(ex, ex.Message);
+                throw;
+            }
+        }
+
+        protected T SendRequestAndDeserialize<T>(string webMethod, T dataObject, out string jsonResponse) where T : class, new() {
+            Logger.Information("SendRequestAndDeserialize begin");
+            jsonResponse = "";
+            try {
+                HttpResponseMessage response;
+                Logger.Information("HttpClient initializing");
+                using (var client = GetClient()) {
+                    Logger.Information("Request sent");
+                    response = AsyncHelpers.RunSync(() => client.PostAsJsonAsync(webMethod, dataObject));
+                    Logger.Information("Response received");
+                    jsonResponse = AsyncHelpers.RunSync(() => response.Content.ReadAsStringAsync());
+                    if (response.IsSuccessStatusCode)
+                        return JsonConvert.DeserializeObject<T>(jsonResponse);
+                    else {
+
+                        return null;
+                    }
+                }
+            }
+            catch (Exception ex) {
+                Logger.Error(ex, ex.Message);
+                return null;
+            }
+        }
+
+        protected async Task<string> SendRequestAsync<T>(string webMethod, T dataObject) where T : class, new() {
+            Logger.Information("SendRequestAndDeserialize begin");
+            try {
+                HttpResponseMessage response;
+                Logger.Information("HttpClient initializing");
+                using (var client = GetClient()) {
+                    Logger.Information("Request sent");
+                    response = await client.PostAsJsonAsync(webMethod, dataObject);
+                    Logger.Information("Response received");
+                    var jsonResponse = await response.Content.ReadAsStringAsync();
+                    if (response.IsSuccessStatusCode)
+                        return jsonResponse;
+                    else {
+                        return null;
+                    }
+                }
+            }
+            catch (Exception ex) {
+                Logger.Error(ex, ex.Message);
+                return null;
+            }
+        }
+
+        protected async Task<T> GetRequestAndDeserializeAsync<T>(string webMethod) where T : class, new() {
+            Logger.Information("GetRequestAndDeserialize begin");
+            try {
+                HttpResponseMessage response;
+                Logger.Information("HttpClient initializing");
+                using (var client = GetClient()) {
+                    Logger.Information("Request sent");
+                    response = await client.GetAsync(webMethod);
+                    Logger.Information("Response received");
+                    var jsonResponse = await response.Content.ReadAsStringAsync();
+                    if (response.IsSuccessStatusCode)
+                        return JsonConvert.DeserializeObject<T>(jsonResponse);
+                    else {
+                        return null;
+                    }
+                }
+            }
+            catch (Exception ex) {
+                Logger.Error(ex, ex.Message);
+                return null;
+            }
+        }
+
+        protected bool SendRequest<T>(string webMethod, T dataObject, out HttpContent content) where T : class, new() {
+            Logger.Debug("SendRequest begin");
+            try {
+                HttpResponseMessage response;
+                //Console.WriteLine("REQUEST: " + webMethod + " " + Environment.NewLine + (JsonConvert.SerializeObject(dataObject)));
+                Logger.Debug("HttpClient initializing");
+                using (var client = GetClient()) {
+                    Logger.Debug("Request {0} Sent at {1}", webMethod, DateTime.Now.ToString("dd-MMM-yyyy HH:mm:ss"));
+                    response = AsyncHelpers.RunSync(() => client.PostAsJsonAsync(webMethod, dataObject));
+                    content = response.Content;
+                    Logger.Debug("Response {0} Returned at {1}", webMethod, DateTime.Now.ToString("dd-MMM-yyyy HH:mm:ss"));
+                    return response.IsSuccessStatusCode;
+                }
+            }
+            catch (Exception ex) {
+                Logger.Error(ex, ex.Message);
+                throw;
+            }
+        }
+
+        #region Private Methods
+        private X509Certificate GetClientCertificate() {
+            X509Store store = null;
+            try {
+                store = new X509Store(StoreName.Root, StoreLocation.LocalMachine);
+                Logger.Debug("Reading certificates from {0} {1}", StoreName.Root.ToString(), StoreLocation.LocalMachine);
+                store.Open(OpenFlags.OpenExistingOnly | OpenFlags.ReadOnly);
+
+                //var allCerts = store.Certificates;
+                Logger.Debug("Filtering using Serial Number");
+                //var certs = store.Certificates.Find(X509FindType.FindBySerialNumber, "7C6AE3331B6A3CB34B1E0942E321C154", false);
+                var certs = store.Certificates.Find(X509FindType.FindBySerialNumber,
+                    ConfigurationManager.AppSettings["certificateserialnumber"], false);
+
+                if (certs.Count == 1) {
+                    Logger.Debug("Certificate found");
+                    var cert = certs[0];
+                    return cert;
+                }
+                else {
+                    Logger.Fatal("Client certificate not found under {0} {1}. Check the serial number in AppSettings", StoreName.Root.ToString(), StoreLocation.LocalMachine);
+                    throw new Exception("Unable to connect to the server", new Exception("Certificate not found"));
+                }
+            }
+            catch (Exception ex) {
+                Logger.Error(ex, ex.Message);
+                throw ex;
+            }
+            finally {
+                if (store != null)
+                    store.Close();
+            }
+
+            //return null;
+        }
+
+        private HttpClient GetClient() {
+            try {
+                var handler = new WebRequestHandler();
+                handler.ClientCertificateOptions = ClientCertificateOption.Manual;
+                handler.ClientCertificates.Add(GetClientCertificate());
+                handler.ServerCertificateValidationCallback += Validate;
+
+                handler.UseProxy = false;
+                var client = new HttpClient(handler);
+                //client.BaseAddress = new Uri("https://devwba.cityfleet.co.uk/");
+                client.BaseAddress = new Uri(BaseUrl);
+                client.DefaultRequestHeaders.Accept.Clear();
+                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                Logger.Debug("HttpClient initialized");
+                return client;
+            }
+            catch (Exception) {
+                throw;
+            }
+        }
+
+        private bool Validate(object sender, X509Certificate certificate, X509Chain chain, System.Net.Security.SslPolicyErrors sslPolicyErrors) {
+            return true;
+        }
+        #endregion
+    }
+}
