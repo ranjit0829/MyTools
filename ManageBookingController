@@ -1,0 +1,662 @@
+
+using Orchard.Mvc;
+using Orchard.Themes;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web.Mvc;
+
+using System.Text;
+using System.Dynamic;
+using System.Configuration;
+using Newtonsoft.Json;
+using System.Xml.Linq;
+using System.Xml;
+
+namespace cf.Booking.Controllers
+{
+    [HandleError, Themed]
+    public class ManageBookingController : BaseController
+    {
+        private readonly ITripDomainService _tripDomainService;
+        private readonly IUserProfileDomainService _userProfileDomainService;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IUtilityDomainService _utilityDomainService;
+
+        private const bool IS_RTA_TIME_TRUE = true;
+        private const bool IS_BOOKED_TIME_FALSE = false;
+        private const int DEFAULT_RESULTS_COUNT = 100;
+
+        private bool IsTodaysByRtaAscending
+        {
+            get
+            {
+                return Convert.ToBoolean(ConfigurationManager.AppSettings["IsTodaysByRtaAscending"]);
+            }
+        }
+
+        public DateTime TodayMinTime
+        {
+            get
+            {
+                return new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, 0, 0, 0);
+            }
+        }
+        public DateTime TodayMaxTime
+        {
+            get
+            {
+                //2015-12-02T23:59:59.01058+00:00
+                return new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, 23, 59, 59);
+
+            }
+        }
+
+        public DateTime FutureStartMinTime
+        {
+            get
+            {
+                DateTime tempDate = DateTime.Now.AddDays(1);
+                return new DateTime(tempDate.Year, tempDate.Month, tempDate.Day, 0, 0, 0);
+
+            }
+        }
+        public DateTime FutureEndMaxTime
+        {
+            get
+            {
+                DateTime tempDate = DateTime.Now.AddMonths(3);
+                return new DateTime(tempDate.Year, tempDate.Month, tempDate.Day, 23, 59, 59);
+            }
+        }
+        public DateTime FutureEndMaxTimeSB
+        {
+            get
+            {
+                DateTime tempDate = DateTime.Now.AddMonths(1);
+                return new DateTime(tempDate.Year, tempDate.Month, tempDate.Day, 23, 59, 59);
+            }
+        }
+        public DateTime PastStartMinTime
+        {
+            get
+            {
+                DateTime tempDate = DateTime.Now.AddMonths(-3);
+                return new DateTime(tempDate.Year, tempDate.Month, tempDate.Day, 0, 0, 0);
+
+            }
+        }
+        public DateTime PastEndMaxTime
+        {
+            get
+            {
+                DateTime tempDate = DateTime.Now.AddDays(-1);
+                return new DateTime(tempDate.Year, tempDate.Month, tempDate.Day, 23, 59, 59);
+            }
+        }
+
+        public ManageBookingController(ITripDomainService tripDomainService,
+            IUserProfileDomainService userProfileDomainService,
+            IHttpContextAccessor httpContextAccessor,
+            IUtilityDomainService utilityDomainService)
+            : base(userProfileDomainService)
+        {
+            _tripDomainService = tripDomainService;
+            _userProfileDomainService = userProfileDomainService;
+            _httpContextAccessor = httpContextAccessor;
+            _utilityDomainService = utilityDomainService;
+
+        }
+
+        // GET: ManageBooking
+        public ActionResult ManageBooking()
+        {
+            //UserType;
+            switch (UserType)
+            {
+                case UserIdentityType.StandardUser:
+                    var viewModel = StandardBookerManageBooking();
+                    return View("ManageBooking", viewModel);
+
+                case UserIdentityType.SuperBooker:
+                case UserIdentityType.OmniBooker:
+                case UserIdentityType.Marshall:
+                    var superBookerViewModel = SuperBookerManageBooking();
+
+                    return View("ManageBooking-SuperBooker", superBookerViewModel);
+                default:
+                    return View();
+            }
+        }
+
+        private InitialManageBookingViewModel StandardBookerManageBooking()
+        {
+            InitialManageBookingViewModel initialManageViewModel = new InitialManageBookingViewModel();
+            IList<ProfileNameNumberItem> profileTelephoneNumberTags = GetPassengerNames();
+            List<EnumItem> tripStatuses = PopulateStatuses();
+            IList<EnumItem> accountTypes = GetAccountTypes();
+
+            initialManageViewModel.TextMessages = _utilityDomainService.GetTextMessageCollection("Business", "Pages", "MyBookings");
+            initialManageViewModel.ProfileTelephoneNumberCount = profileTelephoneNumberTags.Count;
+            initialManageViewModel.ProfileTelephoneNumberTags = profileTelephoneNumberTags;
+            initialManageViewModel.TripStatuses = tripStatuses.OrderBy(n => n.Name).ToList();
+            initialManageViewModel.AccountTypes = accountTypes.OrderBy(n => n.Name).ToList();
+
+            var userData = (Hashtable)_httpContextAccessor.Current().Session[SiteConstants.SessionNames.SITE_USER];
+            string accountNumber = string.Empty;
+            UserIdentityType userIdentityType = UserIdentityType.None;
+            if (userData != null)
+            {
+                userIdentityType = (UserIdentityType)(userData[SiteConstants.UserSessionVariablesNames.BRAND_TYPE]);
+                accountNumber = Convert.ToString(userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER]);
+                initialManageViewModel.AccountNumber = accountNumber;
+            }
+
+            // For Taxicard
+            if (userIdentityType == UserIdentityType.TaxiCard)
+            {
+                var getAccountTripLimitSummaryResponse = _tripDomainService.GetAccountTripLimitSummaryRequest();
+                initialManageViewModel.TripLimitSummary = getAccountTripLimitSummaryResponse != null ? getAccountTripLimitSummaryResponse : new GetAccountTripLimitSummaryResponse();
+            }
+
+            //Fetch todays bookings
+            FindMyTripsCriteria todayCriteria = new FindMyTripsCriteria()
+            {
+                AccountNumber = accountNumber,
+                MaxResults = DEFAULT_RESULTS_COUNT,
+                SearchStartTimeLocal = TodayMinTime,
+                SearchEndTimeLocal = TodayMaxTime,
+                IsBookedTime = IS_BOOKED_TIME_FALSE,
+                IsRtaTime = IS_RTA_TIME_TRUE,
+                SortField = TripSortField.RequiredTimeOfArrival,
+                SortOrder = TripSortOrder.Descending
+            };
+            var todaysList = GetTripItemsByCriteria(todayCriteria);
+            if (todaysList != null && todaysList.Count > 0)
+            {
+                initialManageViewModel.TodaysTripCount = todaysList.Count;
+                initialManageViewModel.TodaysBooking = todaysList
+                    .Take(2).ToList();
+            }
+
+            //Fetch future bookings
+            FindMyTripsCriteria futureCriteria = new FindMyTripsCriteria()
+            {
+                AccountNumber = accountNumber,
+                MaxResults = DEFAULT_RESULTS_COUNT,
+                SearchStartTimeLocal = FutureStartMinTime,
+                SearchEndTimeLocal = FutureEndMaxTime,
+                IsBookedTime = IS_BOOKED_TIME_FALSE,
+                IsRtaTime = IS_RTA_TIME_TRUE,
+                SortField = TripSortField.RequiredTimeOfArrival,
+                SortOrder = TripSortOrder.Ascending
+            };
+            var futureList = GetTripItemsByCriteria(futureCriteria);
+            if (futureList != null && futureList.Count > 0)
+            {
+                initialManageViewModel.FutureTripCount = futureList.Count;
+                initialManageViewModel.FutureBooking = futureList
+                    .Take(2).ToList();
+            }
+
+            //Fetch past booking count
+            FindMyTripsCriteria pastCriteria = new FindMyTripsCriteria()
+            {
+                AccountNumber = accountNumber,
+                MaxResults = DEFAULT_RESULTS_COUNT,
+                SearchStartTimeLocal = PastStartMinTime,
+                SearchEndTimeLocal = PastEndMaxTime,
+                IsBookedTime = IS_BOOKED_TIME_FALSE,
+                IsRtaTime = IS_RTA_TIME_TRUE,
+                SortField = TripSortField.RequiredTimeOfArrival,
+                SortOrder = TripSortOrder.Descending
+            };
+
+            var pastList = GetTripItemsByCriteria(pastCriteria);
+            if (pastList != null && pastList.Count > 0)
+            {
+                initialManageViewModel.PastBooking = pastList.Take(2).ToList();
+                initialManageViewModel.PastTripCount = pastList.Count;
+            }
+            return initialManageViewModel;
+        }
+
+        private InitialManageSuperBookerViewModel SuperBookerManageBooking()
+        {
+            InitialManageSuperBookerViewModel initialManageViewModel = new InitialManageSuperBookerViewModel();
+
+            IList<EnumItem> accountTypes = GetAccountTypes();
+            List<Accounts> bookerAccounts = new List<Accounts>();
+            initialManageViewModel.TextMessages = _utilityDomainService.GetTextMessageCollection("Business", "Pages", "MyBookings");
+
+            string accountNumber = string.Empty;
+
+            var userData = (Hashtable)_httpContextAccessor.Current().Session[SiteConstants.SessionNames.SITE_USER];
+            if (userData != null)
+            {
+
+                string defaultAccountUserName = string.Empty;
+                accountNumber = Convert.ToString(userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER]);
+                //Remove account number to to pull all account booking from api
+                //userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] = string.Empty;
+
+                FindMyTripsCriteria defaultCriteria = new FindMyTripsCriteria()
+                {
+                    MaxResults = 0,
+                    AccountNumber = null,
+                    SearchStartTimeLocal = TodayMinTime,
+                    SearchEndTimeLocal = FutureEndMaxTimeSB,
+                    IsBookedTime = IS_BOOKED_TIME_FALSE,
+                    IsRtaTime = IS_RTA_TIME_TRUE,
+                    SortField = TripSortField.RequiredTimeOfArrival,
+                    SortOrder = TripSortOrder.Ascending,
+                    VehicleTrackingTripsOnly = false
+                };
+
+                var allList = GetTripItemsByCriteria(defaultCriteria);
+                if (allList != null && allList.Count > 0)
+                {
+                    initialManageViewModel.AllTripsCount = allList.Count;
+                    initialManageViewModel.AllBookings = allList
+                        .Take(30).ToList();
+                }
+
+
+                if (!string.IsNullOrEmpty(accountNumber))
+                {
+                    GetUserPassengerDefaultsResponse userPassengerDefaults = _userProfileDomainService.UserPassengerDefaults(accountNumber);
+                    defaultAccountUserName = userPassengerDefaults.PassengerDefaults.PassengerName;
+                }
+                if (userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_BOOKERS] != null)
+                {
+                    bookerAccounts = (List<Accounts>)(userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_BOOKERS]);
+                }
+                if (UserType == CityFleet.Models.Enums.UserIdentityType.OmniBooker || UserType == CityFleet.Models.Enums.UserIdentityType.SuperBooker)
+                {
+                    if (bookerAccounts != null && bookerAccounts.Count == 1)
+                    {
+                        defaultAccountUserName = bookerAccounts[0].AccountName;
+                        accountNumber = bookerAccounts[0].AccountNumber;
+                    }
+                }
+                initialManageViewModel.LoggedInUserType = UserType;
+                initialManageViewModel.SuperBookerDefaultUserName = defaultAccountUserName;
+                initialManageViewModel.SuperBookerDefaultAccountNumber = accountNumber;
+                initialManageViewModel.BookerAccounts = bookerAccounts;
+            }
+
+            initialManageViewModel.ProfileTelephoneNumberTags = GetPassengerNames();
+            initialManageViewModel.TripStatuses = PopulateStatuses();
+            initialManageViewModel.AccountTypes = accountTypes;
+
+
+            //After getting all account data from api re-instate account number in session
+            userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] = accountNumber;
+
+            return initialManageViewModel;
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public JsonResult FindTripsByCriteriaForAccountNumber(FindMyTripsCriteria criteria, string accountType)
+        {
+            criteria.IsRtaTime = IS_RTA_TIME_TRUE;
+            criteria.IsBookedTime = IS_BOOKED_TIME_FALSE;
+
+            var list = GetTripItemsByCriteria(criteria);
+            return Json(list);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public JsonResult FindTripsByCriteria(FindMyTripsCriteria criteria, string accountType, int timeSpan = 0)
+        {
+            if (timeSpan > 0)
+            {
+                criteria.SearchStartTimeLocal = DateTime.Now.AddMinutes(-timeSpan);
+                criteria.SearchEndTimeLocal = DateTime.Now.AddMinutes(timeSpan);
+            }
+            criteria.IsRtaTime = criteria.IsRtaTime;
+            criteria.IsBookedTime = criteria.IsBookedTime;
+            criteria.SortField = criteria.SortField;
+            criteria.SortOrder = criteria.SortOrder;
+            var list = GetTripItemsByCriteria(criteria);
+            return Json(list);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public JsonResult GetPastTrips(FindMyTripsCriteria criteria, string accountType)
+        {
+            criteria.SearchStartTimeLocal = PastStartMinTime;
+            criteria.SearchEndTimeLocal = PastEndMaxTime;
+            criteria.IsRtaTime = criteria.IsRtaTime;
+            criteria.IsBookedTime = criteria.IsBookedTime;
+            criteria.SortField = criteria.SortField;
+            criteria.SortOrder = criteria.SortOrder;
+            var results = GetTripItemsByCriteria(criteria);
+            return Json(results);
+        }
+
+
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public JsonResult GetFutureTrips(FindMyTripsCriteria criteria, string accountType)
+        {
+            criteria.SearchStartTimeLocal = FutureStartMinTime;
+            criteria.SearchEndTimeLocal = FutureEndMaxTime;
+            criteria.IsRtaTime = criteria.IsRtaTime;
+            criteria.IsBookedTime = criteria.IsBookedTime;
+            criteria.SortField = criteria.SortField;
+            criteria.SortOrder = criteria.SortOrder;
+            var results = GetTripItemsByCriteria(criteria);
+            return Json(results);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public JsonResult GetTodaysTrips(FindMyTripsCriteria criteria, string accountType)
+        {
+            criteria.SearchStartTimeLocal = TodayMinTime;
+            criteria.SearchEndTimeLocal = TodayMaxTime;
+            criteria.IsRtaTime = criteria.IsRtaTime;
+            criteria.IsBookedTime = criteria.IsBookedTime;
+            criteria.SortField = criteria.SortField;
+            criteria.SortOrder = criteria.SortOrder;
+
+            var results = GetTripItemsByCriteria(criteria).ToList();
+            return Json(results);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public string GetPassengerNamesByAccount(string accountNumber)
+        {
+            IList<ProfileNameNumberItem> results = new List<ProfileNameNumberItem>();
+            if (!string.IsNullOrEmpty(accountNumber))
+            {
+
+                string accountNumberSession = string.Empty;
+                var userData = (Hashtable)_httpContextAccessor.Current().Session[SiteConstants.SessionNames.SITE_USER];
+
+                if (userData != null)
+                {
+                    accountNumberSession = Convert.ToString(userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER]);
+                    userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] = accountNumber;
+                }
+
+                var profileUsers = _tripDomainService.FindProfileTelephoneNumberTags(new ProfileTelephoneNumberCriteria()
+                {
+                    Name = string.Empty,
+                    PageOffset = 0,
+                    PageSize = 0
+                });
+
+                results = profileUsers.Items != null
+                   ? profileUsers.Items.OrderBy(n => n.Name).ToList()
+                   : (new List<ProfileNameNumberItem>());
+
+                //re-instate previous session value
+                userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] = accountNumberSession;
+            }
+            return JsonConvert.SerializeObject(results);
+        }
+
+        private List<EnumItem> PopulateStatuses()
+        {
+            List<EnumItem> statusList = new List<EnumItem>();
+            TripStatusNamesResponse statuses = _tripDomainService.GetTripStatusNames();
+            if (statuses != null && statuses.TripStatusNames != null && statuses.TripStatusNames.Count > 0)
+            {
+                foreach (var item in statuses.TripStatusNames)
+                {
+                    statusList.Add(new EnumItem { Name = item, Description = item });
+                }
+
+                if (statusList.ElementAt(0).Name != "0")
+                {
+                    statusList.Add(new EnumItem() { Name = "0", Description = "All Statuses" });
+                }
+            }
+            return statusList.OrderBy(n => n.Name).ToList();
+        }
+
+        private IList<ProfileNameNumberItem> GetPassengerNames()
+        {
+            IList<ProfileNameNumberItem> passengerNames = new List<ProfileNameNumberItem>();
+            FindProfileTelephoneNumberTagsResponse response = null;
+            response = _tripDomainService.FindProfileTelephoneNumberTags(new ProfileTelephoneNumberCriteria()
+            {
+                Name = string.Empty,
+                PageOffset = 0,
+                PageSize = 0
+            });
+
+            passengerNames = response.Items != null
+                ? response.Items.OrderBy(n => n.Name).ToList()
+                : (new List<ProfileNameNumberItem>());
+
+            return passengerNames;
+        }
+
+        private IList<EnumItem> GetAccountTypes()
+        {
+            IList<EnumItem> accountTypes = new List<EnumItem>();
+
+            foreach (var item in typeof(AccountTypes).GetEnumValuesWithDescription<AccountTypes>())
+            {
+                accountTypes.Add(new EnumItem { Name = item.Key.ToString(), Description = item.Value });
+            }
+
+            return accountTypes;
+        }
+
+        private IList<TripItem> GetTripItemsByCriteria(FindMyTripsCriteria criteria)
+        {
+            var userData = (Hashtable)_httpContextAccessor.Current().Session[SiteConstants.SessionNames.SITE_USER];
+            string accountNumber = string.Empty;
+            bool isPowerUser = false;
+            if (userData != null)
+            {
+                if (userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] != null)
+                {
+                    accountNumber = Convert.ToString(userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER]);
+                }
+                userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] = criteria.AccountNumber;
+                isPowerUser = string.IsNullOrEmpty(criteria.AccountNumber);
+            }
+
+            IList<TripItem> returntValue = _tripDomainService.GetUserTripsByCriteria(criteria, isPowerUser).FindMyTripItem;
+            IList<TripItem> trips = new List<TripItem>();
+
+            if (returntValue != null && returntValue.Count > 0)
+            {
+                trips = returntValue;
+            }
+
+            //reinstate accountNumber value from session
+            userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] = accountNumber;
+            return trips;
+        }
+
+
+        [AcceptVerbs(HttpVerbs.Post | HttpVerbs.Get)]
+        public ActionResult BookingDetails(string bookingReference, string accountNo, string geminiChoice)
+        {
+            if (!string.IsNullOrEmpty(bookingReference))
+            {
+                Session.Add(SiteConstants.UserSessionVariablesNames.BOOKING_REFERENCE, bookingReference);
+                Session.Add(SiteConstants.UserSessionVariablesNames.TEMP_USER_ACCOUNT_NUMBER, accountNo);
+            }
+            else
+            {
+                if (Session[SiteConstants.UserSessionVariablesNames.BOOKING_REFERENCE] != null)
+                {
+                    bookingReference = Convert.ToString(Session[SiteConstants.UserSessionVariablesNames.BOOKING_REFERENCE]);
+                    accountNo = Convert.ToString(Session[SiteConstants.UserSessionVariablesNames.TEMP_USER_ACCOUNT_NUMBER]);
+                }
+            }
+
+            Hashtable userData = null;
+            string selectedAccountNumber = string.Empty;
+            if (!string.IsNullOrEmpty(accountNo))
+            {
+                userData = (Hashtable)_httpContextAccessor.Current().Session[SiteConstants.SessionNames.SITE_USER];
+                selectedAccountNumber = Convert.ToString(userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER]);
+                userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] = accountNo;
+            }
+
+            DetailedTripViewModel detailedTripViewModel = new DetailedTripViewModel();
+            GetTripResponse getTripResponse = _tripDomainService.GetTrip(bookingReference);
+            BookingQuestions questions = _tripDomainService.GetBookingQuestions();
+            var accountBookingRules = _tripDomainService.AccountBookingRules(getTripResponse.Trip.RtaLocalDate, 0, BookingChannelFlags.Web);
+
+            TripItem tripItem = _tripDomainService.GetUserTripsByCriteria(new FindMyTripsCriteria
+            {
+                References = bookingReference
+            }).FindMyTripItem.FirstOrDefault();
+
+
+            detailedTripViewModel.AccountNumber = tripItem.AccountNumber;
+            detailedTripViewModel.AccountGeminiChoice = Convert.ToInt32(geminiChoice);
+            detailedTripViewModel.TripReference = getTripResponse.Trip.TripReference;
+            detailedTripViewModel.PassengerName = getTripResponse.Trip.PassengerName;
+            TripStatusItem status = getTripResponse.Trip.TripStatus;
+            detailedTripViewModel.TripStatus = getTripResponse.Trip.TripStatus;
+            detailedTripViewModel.UserCancellationNote = (!string.IsNullOrEmpty(getTripResponse.Trip.UserCancellationNote))
+                ? getTripResponse.Trip.UserCancellationNote
+                : string.Empty;
+            if (getTripResponse.Trip.Quote != null)
+            {
+                detailedTripViewModel.Quote = new TripQuoteItem();
+                detailedTripViewModel.Quote.Quote = getTripResponse.Trip.Quote.Quote;
+                detailedTripViewModel.Quote.QuoteDisclaimerId = getTripResponse.Trip.Quote.QuoteDisclaimerId;
+            }
+
+            detailedTripViewModel.BookedOn = getTripResponse.Trip.BookedTimeLocal;
+
+
+            if (getTripResponse.Trip.LastModifiedTimeLocal.HasValue)
+            {
+                detailedTripViewModel.LastModifiedTimeLocal = getTripResponse.Trip.LastModifiedTimeLocal.Value;
+            }
+            else
+            {
+                detailedTripViewModel.LastModifiedTimeLocal = null;
+            }
+
+            detailedTripViewModel.LastModifiedBy = getTripResponse.Trip.LastModifiedBy;
+            detailedTripViewModel.BookingStatus = getTripResponse.Trip.TripStatus.Status;
+            detailedTripViewModel.PassengerTelephoneNumber = getTripResponse.Trip.PassengerTelephoneNumber;
+            detailedTripViewModel.PassengerAlternateTelephoneNumber = getTripResponse.Trip.PassengerAlternateTelephoneNumber;
+            detailedTripViewModel.PickupAddress = getTripResponse.Trip.JourneyNodes.PickupAddress.AddressToDisplay;
+            detailedTripViewModel.IntermediateAddress = getTripResponse.Trip.JourneyNodes.AdditionalStops;
+            detailedTripViewModel.DestinationAddress = getTripResponse.Trip.JourneyNodes.DestinationAddress.AddressToDisplay;
+            if (tripItem.TripAllocation != null)
+            {
+                detailedTripViewModel.TripAllocation = new TripAllocationItem();
+                detailedTripViewModel.DriversName = tripItem.TripAllocation.DriverReference;
+                StringBuilder contactNumbers = new StringBuilder();
+                if (!string.IsNullOrEmpty(tripItem.TripAllocation.DriverContactNumber))
+                {
+                    contactNumbers.Append(tripItem.TripAllocation.DriverContactNumber);
+                    if (!string.IsNullOrEmpty(tripItem.TripAllocation.DriverAlternateContactNumber))
+                    {
+                        contactNumbers.AppendFormat(" / {0}", tripItem.TripAllocation.DriverAlternateContactNumber);
+                    }
+                }
+
+                detailedTripViewModel.TripAllocation.DriverContactNumber = contactNumbers.ToString();
+                detailedTripViewModel.TripAllocation.SupplierName = tripItem.TripAllocation.SupplierName;
+                detailedTripViewModel.TripAllocation.VehicleColour = tripItem.TripAllocation.VehicleColour;
+                detailedTripViewModel.TripAllocation.VehicleMake = string.Format("{0} <p>{1}</p>", tripItem.TripAllocation.VehicleMake, tripItem.TripAllocation.VehicleRegistration);
+                detailedTripViewModel.TripAllocation.IsTripTrackable = tripItem.TripAllocation.IsTripTrackable;
+            }
+            detailedTripViewModel.TravellingPassengers = tripItem.TravellingPassengers;
+            detailedTripViewModel.TripBookedDate = Convert.ToDateTime(getTripResponse.Trip.RtaLocal);
+            detailedTripViewModel.TripBookedTime = getTripResponse.Trip.RtaLocalDate.ToString("HH:mm");
+            detailedTripViewModel.Miles = getTripResponse.Trip.DrivingDistance;
+            detailedTripViewModel.BookingQuestionAnswers = new List<string>();
+            if (getTripResponse.Trip.BookingQuestionAnswers != null
+                && getTripResponse.Trip.BookingQuestionAnswers.Count > 0
+                && questions != null)
+            {
+                foreach (var item in getTripResponse.Trip.BookingQuestionAnswers)
+                {
+                    CityFleet.Models.Questions q = questions.Questions.Where(i => i.QuestionId == item.QuestionId).SingleOrDefault();
+                    string questionAndAnswer = string.Format("{0} : {1}", q.QuestionPrompt, item.Answer);
+                    detailedTripViewModel.BookingQuestionAnswers.Add(questionAndAnswer);
+                }
+            }
+
+            List<AvailableBookingOptionsItem> bookingOptions = new List<AvailableBookingOptionsItem>();
+            if (getTripResponse.Trip.BookingOptions != null)
+            {
+                foreach (var item in getTripResponse.Trip.BookingOptions)
+                {
+                    AvailableBookingOptionsItem bookingOptionItem = accountBookingRules.AccountBookingRules.AvailableBookingOptions
+                        .Where(o => (int)o.BookingOptionFlag == (int)item.BookingOptionFlag)
+                        .SingleOrDefault();
+                    bookingOptions.Add(bookingOptionItem);
+                }
+                detailedTripViewModel.AvailableTripOption = bookingOptions;
+            }
+
+            detailedTripViewModel.NotificationsEmail = string.Empty;
+            if (!string.IsNullOrEmpty(getTripResponse.Trip.PassengerEmailAddress))
+            {
+                detailedTripViewModel.NotificationsEmail = getTripResponse.Trip.PassengerEmailAddress;
+            }
+            else
+            {
+                detailedTripViewModel.NotificationsEmail = "-";
+            }
+
+            detailedTripViewModel.NotificationsMobile = string.Empty;
+            if (!string.IsNullOrEmpty(getTripResponse.Trip.PassengerTelephoneNumber))
+            {
+                detailedTripViewModel.NotificationsMobile = getTripResponse.Trip.PassengerTelephoneNumber;
+            }
+            else
+            {
+                detailedTripViewModel.NotificationsMobile = "-";
+            }
+
+            detailedTripViewModel.SpecialInstruction = string.IsNullOrEmpty(getTripResponse.Trip.DriverNotes)
+                ? string.Empty
+                : getTripResponse.Trip.DriverNotes;
+
+            //Once data pulled for detail page - cleaning up temp Session variable
+            if (userData != null)
+            {
+                userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] = selectedAccountNumber;
+                Session[SiteConstants.UserSessionVariablesNames.TEMP_USER_ACCOUNT_NUMBER] = string.Empty;
+            }
+
+            return View(detailedTripViewModel);
+        }
+
+
+        [HttpPost]
+        public JsonResult GetTripCancellationNote(string tripReference, string accountNo, string geminiChoice)
+        {
+            var userData = (Hashtable)_httpContextAccessor.Current().Session[SiteConstants.SessionNames.SITE_USER];
+            userData[SiteConstants.UserSessionVariablesNames.ACCOUNT_NUMBER] = accountNo;
+            return Json(_tripDomainService.GetTrip(tripReference).Trip.UserCancellationNote);
+        }
+
+        /// <summary>
+        /// To get the trip details
+        /// </summary>
+        /// <param name="tripReference"></param>
+        /// <returns></returns>
+        [HttpGet]
+        public JsonResult GetTripHistoryItem(string tripReference)
+        {
+            var getTripHistoryResponse = _tripDomainService.GetTripHistoryItem(tripReference);
+            return Json(getTripHistoryResponse, JsonRequestBehavior.AllowGet);
+        }
+    }
+}
