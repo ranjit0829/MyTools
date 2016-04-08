@@ -1,0 +1,808 @@
+using CityFleet.Models;
+using CityFleet.Models.Common;
+using CityFleet.Models.Entities;
+using CityFleet.Models.Enums;
+using CityFleet.Models.Trip;
+using CityFleet.Models.UserProfile;
+using CityFleet.Services.Abstract;
+using CityFleet.Services.Base;
+using CityFleet.Services.Helpers;
+using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Dynamic;
+using System.Threading.Tasks;
+
+namespace CityFleet.Services.Concrete
+{
+    public class TripService : BaseService, ITripService
+    {
+        public TripService()
+            : base(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType)
+        {
+        }
+
+        public TripsResponseItem FindMyTrips(UserIdentity userIdentity, string CurrentAccountNumber, FindMyTripsCriteria tripCriteria)
+        {
+            Logger.Information("FindMyTrips begin");
+            try
+            {
+                var findMyTripsReqObj = new FindMyTripsRequest()
+                {
+                    FindMyTripsCriteria = tripCriteria,
+                    UserIdentity = userIdentity,
+                    AccountNumber = CurrentAccountNumber
+                };
+
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/FindMyTrips/", findMyTripsReqObj, out jsonResponse))
+                    return Deserialize<TripsResponseItem>(jsonResponse);
+            }
+            catch (Exception exception)
+            {
+                Logger.Error("Error occurred in {0} - Exception:{1}", Convert.ToString(System.Reflection.MethodBase.GetCurrentMethod().Name), exception.InnerException.Message);
+                throw exception;
+            }
+
+            return null;
+        }
+
+        public BookingQuestions GetBookingQuestions(UserIdentity userIdentity)
+        {
+            Logger.Information("FindMyTrips begin");
+            try
+            {
+                var bookingQuestRequest = new
+                {
+                    GeminiChoice = userIdentity.GeminiChoice,
+                    UserIdentity = userIdentity,
+                    AccountNumber = AccountNumber
+                };
+                string jsonResponse;
+                if (SendRequest("api/Trip/BookingQuestions/", bookingQuestRequest, out jsonResponse))
+                    return Deserialize<BookingQuestions>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public ValidateBookingQuestionResponse ValidateQuestion(UserIdentity userIdentity, int questionId, string questionAnswer)
+        {
+            Logger.Information("TripValidateQuestion begin");
+            try
+            {
+                var validateBookingQuestionRequest = new ValidateBookingQuestionRequest()
+                {
+                    UserIdentity = userIdentity,
+                    QuestionId = questionId,
+                    Answer = questionAnswer
+                };
+                string jsonResponse;
+                if (SendRequest("api/Trip/ValidateQuestion/", validateBookingQuestionRequest, out jsonResponse))
+                    return Deserialize<ValidateBookingQuestionResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public async Task<AccountBookingRulesResponse> GetAccountBookingRulesAsync(UserIdentity userIdentity, DateTime rta, int currentCustomProductId, BookingChannelFlags bookingChannel, string accountNumber)
+        {
+            Logger.Information("AccountBookingRules begin");
+            try
+            {
+                var accountBookingRulesReqObj = new AccountBookingRulesRequest()
+                {
+                    UserIdentity = userIdentity,
+                    RTA = rta,
+                    BookingChannel = bookingChannel,
+                    CurrentCustomProductId = currentCustomProductId,
+                    AccountNumber = accountNumber
+                };
+                string jsonResponse = await SendRequestAsync("api/Trip/AccountBookingRules/", accountBookingRulesReqObj);
+                return Deserialize<AccountBookingRulesResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public AccountBookingRulesResponse GetAccountBookingRules(UserIdentity userIdentity, DateTime rta, int currentCustomProductId, BookingChannelFlags bookingChannel)
+        {
+            Logger.Information("AccountBookingRules begin");
+            try
+            {
+                var accountBookingRulesReqObj = new AccountBookingRulesRequest()
+                {
+                    UserIdentity = userIdentity,
+                    RTA = rta,
+                    BookingChannel = bookingChannel,
+                    CurrentCustomProductId = currentCustomProductId,
+                    AccountNumber = AccountNumber
+                };
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/AccountBookingRules/", accountBookingRulesReqObj, out jsonResponse))
+                    return Deserialize<AccountBookingRulesResponse>(jsonResponse);
+
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public ReplicatedTripResponse ReplicatedTrip(UserIdentity userIdentity, ReplicatedTripDataItem replicatedTripData)
+        {
+            Logger.Information("ReplicatedTrip begin");
+            try
+            {
+                var replicatedTripReqObj = new ReplicatedTripRequest()
+                {
+                    ReplicateTripData = replicatedTripData,
+                    UserIdentity = userIdentity
+                };
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/GetReplicateTrip/", replicatedTripReqObj, out jsonResponse))
+                    return Deserialize<ReplicatedTripResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Error occurred in " + Convert.ToString(System.Reflection.MethodBase.GetCurrentMethod().Name), ex);
+            }
+            return null;
+        }
+
+        public FindProfileTelephoneNumberTagsResponse FindProfileTelephoneNumberTags(UserIdentity userIdentity, ProfileTelephoneNumberCriteria criteria)
+        {
+            Logger.Information("FindProfileTelephoneNumberTags begin");
+            if (userIdentity != null && string.IsNullOrEmpty(userIdentity.AccountNumber))
+            {
+                userIdentity.AccountNumber = AccountNumber;
+            }
+
+            try
+            {
+                var findProfileTelephoneNumberTagsReqObj = new FindProfileTelephoneNumberTagsRequest()
+                {
+                    Criteria = criteria,
+                    UserIdentity = userIdentity
+                };
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/FindProfileTelephoneNumberTags/", findProfileTelephoneNumberTagsReqObj, out jsonResponse))
+                    return Deserialize<FindProfileTelephoneNumberTagsResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public AcknowledgeTripResponse AcknowledgeTrip(UserIdentity userIdentity, IList<string> tripReferences)
+        {
+            Logger.Information("AcknowledgeTrip begin");
+            try
+            {
+                var acknowledgeTripReqObj = new AcknowledgeTripRequest()
+                {
+                    TripReferences = tripReferences,
+                    UserIdentity = userIdentity
+                };
+
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/AcknowledgeTrip/", acknowledgeTripReqObj, out jsonResponse))
+                {
+                    return Deserialize<AcknowledgeTripResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public string GetDriverNote(UserIdentity userIdentity, string accountNumber)
+        {
+            Logger.Information("DriverNote begin");
+            try
+            {
+                var driverNoteRequest = new GetDriverNoteRequest()
+                {
+                    UserIdentity = userIdentity,
+                    AccountNumber = !string.IsNullOrEmpty(accountNumber) ? accountNumber : AccountNumber
+                };
+                string jsonResponse = string.Empty;
+                if (base.SendRequest("api/Profile/DriverNote/", driverNoteRequest, out jsonResponse))
+                    Deserialize<GetDriverNoteResponse>(jsonResponse);
+                return jsonResponse;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public GetTripStatusResponse GetTripStatus(UserIdentity userIdentity, string tripReference)
+        {
+            Logger.Information("TripStatus begin");
+            try
+            {
+                var tripStatusRequest = new GetTripStatusRequest()
+                {
+                    UserIdentity = userIdentity,
+                    TripReference = tripReference
+                };
+
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/Status/", tripStatusRequest, out jsonResponse))
+                    return Deserialize<GetTripStatusResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public CancelTripResponse CancelTrip(UserIdentity userIdentity, string tripReference, string userNote, TripCancelReasonType tripCancelReasonType)
+        {
+            Logger.Information("TripCancel begin");
+            try
+            {
+                var cancelTripReq = new CancelTripRequest()
+                {
+                    UserIdentity = userIdentity,
+                    TripReference = tripReference,
+                    UserNote = userNote,
+                    CancellationReason = tripCancelReasonType
+                };
+                string jsonResponse = string.Empty;
+
+                if (SendRequest("api/Trip/Cancel/", cancelTripReq, out jsonResponse))
+                    return Deserialize<CancelTripResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public AddTripResponse Trip(UserIdentity userIdentity, AddTripDataItem addTripDataItem, string tripRefOfOutwardJourney, string accountNumber)
+        {
+            Logger.Information("Trip begin");
+            try
+            {
+                var tripRequest = new AddTripRequest()
+                {
+                    UserIdentity = userIdentity,
+                    Trip = addTripDataItem,
+                    TripReferenceOfOutwardJourney = tripRefOfOutwardJourney,
+                    AccountNumber = accountNumber
+                };
+                string jsonResponse = string.Empty;
+
+                if (SendRequest("api/Trip/Trip/", tripRequest, out jsonResponse))
+                {
+                    return Deserialize<AddTripResponse>(jsonResponse);
+                }
+                else
+                {
+                    Logger.Fatal("Booking Failed.", jsonResponse);
+                    var response = new AddTripResponse();
+                    response.Status = new StatusReply();
+                    response.Status.StatusType = "fail";
+                    response.Status.Errors = new List<Errors>();
+                    response.Status.Errors.Add(new Errors("Some error occured while creating a new booking. Please try again later.", ErrorCodes.None));
+                    return response;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public GetAccountBookingChoicesResponse AccountBookingChoices(UserIdentity userIdentity)
+        {
+            Logger.Information("AccountBookingChoices begin");
+            try
+            {
+                var accountBookingChoicesReqObj = new GetAccountBookingChoicesRequest()
+                {
+                    UserIdentity = userIdentity
+                };
+                string jsonResponse = string.Empty;
+
+                if (SendRequest("api/Trip/AccountBookingChoices/", accountBookingChoicesReqObj, out jsonResponse))
+                {
+                    return Deserialize<GetAccountBookingChoicesResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public async Task<InitialiseTripResponse> InitialiseTripItemByAccountAsync(UserIdentity userIdentity, GeminiChoice geminiChoice, int tripCodeId)
+        {
+            Logger.Information("InitialiseTripItemByAccount begin");
+            try
+            {
+                var initialiseTripItemByAccountReqObj = new InitialiseTripItemByAccountRequest()
+                {
+                    UserIdentity = userIdentity,
+                    GeminiChoice = geminiChoice,
+                    TripCodeId = tripCodeId
+                };
+                string jsonResponse = await SendRequestAsync("api/Trip/InitialiseTripItemByAccount/", initialiseTripItemByAccountReqObj);
+                return JsonConvert.DeserializeObject<InitialiseTripResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public GetTripResponse GetTrip(UserIdentity userIdentity, string tripReference)
+        {
+            Logger.Information("GetTrip begin");
+            try
+            {
+                var response = AsyncHelpers.RunSync(() => GetTripAsync(userIdentity, tripReference));
+                return response;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public async Task<GetTripResponse> GetTripAsync(UserIdentity userIdentity, string tripReference)
+        {
+            Logger.Information("GetTrip begin");
+            try
+            {
+                var getTripReqObj = new GetTripRequest()
+                {
+                    UserIdentity = userIdentity,
+                    TripReference = tripReference,
+                    AccountNumber = !string.IsNullOrEmpty(AccountNumber) ? AccountNumber : string.Empty
+                };
+                string jsonResponse = await SendRequestAsync("api/Trip/GetTrip/", getTripReqObj);
+                return Deserialize<GetTripResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public async Task<CustomProductTripQuoteResponse> CustomProductTripQuote(UserIdentity userIdentity, JourneyNodesItem journeyNodesItem, string accountNumber, BookingChannelFlags bookingChannel, string tripReference, DateTime rtaLocal, bool isAsap, int travellingPassengers, int tripCodeId, int customProductId)
+        {
+            Logger.Information("CustomProductTripQuote begin");
+            try
+            {
+                var customProductTripQuoteReqObj = new CustomProductTripQuoteReQuest()
+                {
+                    AccountNumber = accountNumber,
+                    BookingChannel = bookingChannel,
+                    TripReference = tripReference,
+                    RtaLocal = rtaLocal,
+                    IsAsap = isAsap,
+                    TravellingPassengers = travellingPassengers,
+                    TripCodeId = tripCodeId,
+                    CustomProductId = customProductId,
+                    JourneyNodes = journeyNodesItem,
+                    UserIdentity = userIdentity
+
+                };
+                string jsonResponse = await SendRequestAsync("api/Trip/GetCustomProductTripQuote/", customProductTripQuoteReqObj);
+                return Deserialize<CustomProductTripQuoteResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+
+        }
+
+        public MyRecentJourneyAddressesResponse GetMyRecentJourneyAddresses(UserIdentity userIdentity, string accountNumber, uint maxResult)
+        {
+            Logger.Information("GetMyRecentJourneyAddresses begin");
+            try
+            {
+                var myRecentJourneyAddressesReqObj = new MyRecentJourneyAddressesRequest()
+                {
+                    UserIdentity = userIdentity,
+                    AccountNumber = accountNumber,
+                    MaxResults = maxResult
+                };
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/GetMyRecentJourneyAddresses/", myRecentJourneyAddressesReqObj, out jsonResponse))
+                {
+                    return Deserialize<MyRecentJourneyAddressesResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+
+        }
+
+        public ModifyTripResponse ModifyTrip(ModifyTripDataItem trip, UserIdentity userIdentity)
+        {
+            Logger.Information("ModifyTrip begin");
+            try
+            {
+                var modifyTripReqObj = new ModifyTripRequest()
+                {
+                    UserIdentity = userIdentity,
+                    Trip = trip,
+                    AccountNumber = userIdentity.AccountNumber
+                };
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/ModifyTrip/", modifyTripReqObj, out jsonResponse))
+                {
+                    return Deserialize<ModifyTripResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+
+        }
+
+        public async Task<InitialiseTripResponse> InitialiseTripItemByTripAsync(UserIdentity userIdentity, string referenceNo, BookingChannelFlags bookingChannel, InitialiseByTripType initialiseType)
+        {
+            Logger.Information("InitialiseTripItemByTripAsync begin");
+            try
+            {
+                var initialiseTripItemObj = new InitialiseTripItemByTripRequest()
+                {
+                    UserIdentity = userIdentity,
+                    TripReference = referenceNo,
+                    BookingChannel = bookingChannel,
+                    InitialiseType = initialiseType
+                };
+                string jsonResponse = await SendRequestAsync("api/Trip/InitialiseTripItemByTrip/", initialiseTripItemObj);
+                return JsonConvert.DeserializeObject<InitialiseTripResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public async Task<MyRecentJourneyAddressesResponse> GetMyRecentJourneyAddressesAsync(UserIdentity userIdentity, string accountNumber, uint maxResult)
+        {
+            Logger.Information("GetMyRecentJourneyAddresses begin");
+            try
+            {
+                var myRecentJourneyAddressesReqObj = new MyRecentJourneyAddressesRequest()
+                {
+                    UserIdentity = userIdentity,
+                    AccountNumber = accountNumber,
+                    MaxResults = maxResult
+                };
+                string jsonResponse = await SendRequestAsync("api/Trip/GetMyRecentJourneyAddresses/", myRecentJourneyAddressesReqObj);
+                return Deserialize<MyRecentJourneyAddressesResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public FlightDetailsResponse GetFlightDetails(UserIdentity userIdentity, string accountNumber, string flightNumber, DateTime tripRtaLocal, bool isPickupFromAirport)
+        {
+            Logger.Information("GetFlightDetails begin");
+            try
+            {
+                var flightDetailsObj = new FlightDetailsRequest()
+                {
+                    UserIdentity = userIdentity,
+                    AccountNumber = accountNumber,
+                    FlightNumber = flightNumber,
+                    TripRtaLocal = tripRtaLocal,
+                    IsPickupFromAirport = isPickupFromAirport
+                };
+                string jsonResponse = string.Empty;
+                Logger.Information("GetFlightDetails Request sent to API");
+                if (SendRequest("api/Trip/FlightDetails", flightDetailsObj, out jsonResponse))
+                {
+                    //jsonResponse = @"{'FlightDetails': [{'FlightInformation': 'Flight TK1983 arriving to Heathrow Airport Terminal Two at 02 Jan 2016 21:00 from IST Terminal I','FlightType': 1,'FlightNumber': 'TK1983','DepartureAirport': null,'DepartureTerminal': null,'DepartureTime': '1845 Sat 02-Jan-16','ArrivalAirport': 'Heathrow Airport','ArrivalTerminal': 'Terminal Two','ArrivalTime': '2100 Sat 02-Jan-16','AirportAddress': {'Organisation': 'Heathrow Airport','SubBuildingName': null,'BuildingName': 'Terminal Two','BuildingNumber': null,'DependentThoroughfare': null,'Thoroughfare': 'London Heathrow Airport','DoubleDependentLocality': null,'DependentLocality': null,'County': 'Middlesex','Country': null,'PostTown': 'Hounslow','PostCode': 'TW6 1EW','OSEasting': 507620,'OSNorthing': 175676,'Latitude': 51.469818,'Longitude': -0.451982,'AddressCategory': 'Airport','Status': 1,'AddressKey': 'CF0000000000007026','IsProfileAddress': false,'AddressNotes': null,'FlightItem': null,'AddressToDisplay': 'Heathrow Airport, Terminal Two, London Heathrow Airport, Hounslow, Middlesex, TW6 1EW'}},{'FlightInformation': 'Flight TK1983 arriving to Heathrow Airport Terminal Two at 02 Jan 2016 22:00 from IST Terminal I','FlightType': 1,'FlightNumber': 'TK1983','DepartureAirport': null,'DepartureTerminal': null,'DepartureTime': '1845 Sat 02-Jan-16','ArrivalAirport': 'Heathrow Airport','ArrivalTerminal': 'Terminal Two','ArrivalTime': '2200 Sat 02-Jan-16','AirportAddress': {'Organisation': 'Heathrow Airport','SubBuildingName': null,'BuildingName': 'Terminal Two','BuildingNumber': null,'DependentThoroughfare': null,'Thoroughfare': 'London Heathrow Airport','DoubleDependentLocality': null,'DependentLocality': null,'County': 'Middlesex','Country': null,'PostTown': 'Hounslow','PostCode': 'TW6 1EW','OSEasting': 507620,'OSNorthing': 175676,'Latitude': 51.469818,'Longitude': -0.451982,'AddressCategory': 'Airport','Status': 1,'AddressKey': 'CF0000000000007026','IsProfileAddress': false,'AddressNotes': null,'FlightItem': null,'AddressToDisplay': 'Heathrow Airport, Terminal Two, London Heathrow Airport, Hounslow, Middlesex, TW6 1EW'}}],'Status': {'Heading': null,'Description': null,'StatusType': 'Ok','Errors': null}}";
+                    Logger.Information("GetFlightDetails Response received");
+                    Logger.Information("GetFlightDetails ends");
+                    return Deserialize<FlightDetailsResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public ProfileAddressTagsResponse GetProfileAddressTags(UserIdentity userIdentity, ProfileAddressCriteria profileAddressCriteria)
+        {
+            Logger.Information("TripProfileAddressTags begin");
+            try
+            {
+                var response = AsyncHelpers.RunSync(() => GetProfileAddressTagsAsync(userIdentity, profileAddressCriteria));
+                return response;
+            }
+            catch (Exception exception)
+            {
+                Logger.Error("Error occurred in {0} - Exception:{1}", Convert.ToString(System.Reflection.MethodBase.GetCurrentMethod().Name), exception.InnerException.Message);
+                throw exception;
+            }
+        }
+
+        public async Task<ProfileAddressTagsResponse> GetProfileAddressTagsAsync(UserIdentity userIdentity, ProfileAddressCriteria profileAddressCriteriaItem)
+        {
+            Logger.Information("TripProfileAddressTags begin");
+            try
+            {
+                var profileAddressTagsRequest = new FindProfileAddressTagsRequest()
+                {
+                    UserIdentity = userIdentity,
+                    Criteria = profileAddressCriteriaItem
+                };
+                string jsonResponse = await SendRequestAsync("api/Trip/ProfileAddressTags/", profileAddressTagsRequest);
+                return Deserialize<ProfileAddressTagsResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public TripStatusNamesResponse GetFindMyTripsStatusNames(UserIdentity userIdentity)
+        {
+            Logger.Information("GetFindMyTripsStatusNames begin");
+            try
+            {
+                dynamic satusNamesRequest = new ExpandoObject();
+                satusNamesRequest.UserIdentity = userIdentity;
+                satusNamesRequest.AccountNumber = AccountNumber;
+
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/GetFindMyTripsStatusNames/", satusNamesRequest, out jsonResponse))
+                {
+                    return Deserialize<TripStatusNamesResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public ShareMyLocationResponse ShareMyLocation(UserIdentity userIdentity, DeviceIdentity deviceIdentity, string tripReference, string emailAddress, string url, string accountNumber)
+        {
+            Logger.Information("ShareMyLocation begin");
+            try
+            {
+                ShareMyLocationRequest shareMyLocationReqObj = new ShareMyLocationRequest()
+                {
+                    TripReference = tripReference,
+                    EmailAddress = emailAddress,
+                    AccountNumber = accountNumber,
+                    Url = url,
+                    UserIdentity = userIdentity,
+                    DeviceIdentity = deviceIdentity
+                };
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/ShareMyLocation/", shareMyLocationReqObj, out jsonResponse))
+                {
+                    return Deserialize<ShareMyLocationResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public GetSharedTripByTokenResponse GetSharedTripByToken(Guid trackingCode)
+        {
+            Logger.Information("GetSharedTripByTokenAsync begin");
+            try
+            {
+                GetSharedTripByTokenRequest getSharedTripByTokenReqObj = new GetSharedTripByTokenRequest()
+                {
+                    TrackingCode = trackingCode
+                };
+                string jsonResponse = null;
+                if (SendRequest("api/Trip/GetSharedTripByToken/", getSharedTripByTokenReqObj, out jsonResponse))
+                    return Deserialize<GetSharedTripByTokenResponse>(jsonResponse);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public GetTripStatusUpdateResponse GetTripsStatus(UserIdentity userIdentity, DeviceIdentity deviceIdentity, List<string> tripReferences, string accountNumber)
+        {
+            Logger.Information("GetTripsStatus begin");
+            try
+            {
+                GetTripStatusUpdateRequest tripsUpdates = new GetTripStatusUpdateRequest()
+                {
+                    TripReference = tripReferences,
+                    AccountNumber = accountNumber,
+                    UserIdentity = userIdentity,
+                    DeviceIdentity = deviceIdentity
+                };
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/StatusUpdate", tripsUpdates, out jsonResponse))
+                {
+                    return Deserialize<GetTripStatusUpdateResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+        }
+
+        public ValidateRtaResponse ValidateRta(ValidateRtaItem rtaItem, UserIdentity userIdentity, DeviceIdentity deviceIdentity, string accountNumber)
+        {
+            Logger.Information("ValidateRta begin");
+            try
+            {
+                ValidateRtaRequest validateRtaReqObj = new ValidateRtaRequest()
+                {
+                    RtaItem = rtaItem,
+                    UserIdentity = userIdentity,
+                    DeviceIdentity = deviceIdentity,
+                    AccountNumber = accountNumber
+                };
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Trip/ValidateRta", validateRtaReqObj, out jsonResponse))
+                {
+                    return Deserialize<ValidateRtaResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, ex.Message);
+            }
+            return null;
+
+        }
+
+        public AsDirectedResponse GetAsDirectedAddress() {
+            try {
+                return AsyncHelpers.RunSync<AsDirectedResponse>(() => GetRequestAndDeserializeAsync<AsDirectedResponse>("api/Trip/AsDirectedAddress/AsDirectedAddress"));
+            }
+            catch {
+                throw;
+            }
+        }
+
+        public FindMyTrackableTripResponse GetNextTrackableTrip(UserIdentity userIdentity, DeviceIdentity deviceIdentity, string accountNumber) {
+            Logger.Debug("GetNextTrackableTrip begin");
+            try {
+                FindMyTrackableTripRequest getSharedTripByTokenReqObj = new FindMyTrackableTripRequest() {
+                    UserIdentity = userIdentity,
+                    DeviceIdentity = deviceIdentity,
+                    AccountNumber = accountNumber
+                };
+                string jsonResponse = null;
+                if (SendRequest("api/Trip/FindMyNextTrackableTrip/", getSharedTripByTokenReqObj, out jsonResponse)) {
+                    Logger.Debug("GetNextTrackableTrip end");
+                    return Deserialize<FindMyTrackableTripResponse>(jsonResponse);
+                }
+            }
+            catch (Exception ex) {
+                Logger.Error(ex, ex.Message);
+            }
+            Logger.Debug("GetNextTrackableTrip end");
+            return null;
+        }
+
+        /// <summary>
+        /// To get the trip limits
+        /// </summary>
+        /// <param name="userIdentity"></param>
+        /// <param name="accountNumber"></param>
+        /// <returns></returns>
+        public GetAccountTripLimitSummaryResponse GetAccountTripLimitSummaryRequest(UserIdentity userIdentity, string accountNumber = "")
+        {
+            try
+            {
+                GetAccountTripLimitSummaryRequest request = new GetAccountTripLimitSummaryRequest
+                {
+                    UserIdentity = userIdentity,
+                    AccountNumber = accountNumber
+                };
+                string jsonResponse = string.Empty;
+                if (SendRequest("api/Profile/AccountTripLimitSummary/", request, out jsonResponse))
+                    return Deserialize<GetAccountTripLimitSummaryResponse>(jsonResponse);
+            }
+            catch (Exception exception)
+            {
+                Logger.Error("Error occurred in {0} - Exception:{1}", Convert.ToString(System.Reflection.MethodBase.GetCurrentMethod().Name), exception.InnerException.Message);
+                throw exception;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// To get the Amend details
+        /// </summary>
+        /// <param name="getTripHistoryRequest">GetTripHistoryRequest</param>
+        /// <returns>GetTripHistoryResponse</returns>
+        public GetTripHistoryResponse GetTripHistoryItem(UserIdentity userIdentity, string tripReference, string accountNumber = "")
+        {
+            try
+            {
+                var getTripHistoryRequest = new GetTripHistoryRequest() { UserIdentity = userIdentity, TripReference = tripReference, AccountNumber = accountNumber };
+                //return Deserialize<GetTripHistoryResponse>(MockGetTripHistoryItem());
+                string jsonResponse = string.Empty;
+                if (SendRequest("TODO", getTripHistoryRequest, out jsonResponse))
+                    return Deserialize<GetTripHistoryResponse>(jsonResponse);
+            }
+            catch (Exception exception)
+            {
+                Logger.Error("Error occurred in {0} - Exception:{1}", Convert.ToString(System.Reflection.MethodBase.GetCurrentMethod().Name), exception.InnerException.Message);
+                throw exception;
+            }
+            return null;
+        }
+
+        #region ==Mock data function for remove===
+
+        private string MockGetTripHistoryItem()
+        {
+            var getTripHistoryResponse = new GetTripHistoryResponse();
+            getTripHistoryResponse.History = new List<TripHistoryItem>();
+
+            for (int i = 0; i < 5; i++)
+            {
+                getTripHistoryResponse.History.Add(new TripHistoryItem()
+                {
+                    AmendmentTimeLocal = DateTime.Now.ToShortDateString(),
+                    AmendedBy = "Admin",
+                    Amendments = new List<TripHistoryAmendmentItem>() {
+                        new TripHistoryAmendmentItem(){Name="Muthu"+i,NewValue="Canary Wharf"+i,PreviousValue="Waterloo Station"+i},new TripHistoryAmendmentItem(){Name="Muthu"+i,NewValue="Canary Wharf"+i,PreviousValue="Waterloo Station"+i},new TripHistoryAmendmentItem(){Name="Muthu"+i,NewValue="Canary Wharf"+i,PreviousValue="Waterloo Station"+i} }
+
+                });
+
+            }
+            return JsonConvert.SerializeObject(getTripHistoryResponse);
+        } 
+        #endregion
+    }
+}
